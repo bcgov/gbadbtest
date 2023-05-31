@@ -1,33 +1,21 @@
 apiVersion: template.openshift.io/v1
 kind: Template
 parameters:
-  - name: NAME
-    description: Product name
-    value: quickstart-openshift
-  - name: COMPONENT
-    description: Component name
-    value: database
   - name: ZONE
     description: Deployment zone, e.g. pr-### or prod
     required: true
-  - name: IMAGE_TAG
-    description: Image tag to use
-    value: latest
-  - name: PVC_MOUNT_PATH
-    description: Where to mount the PVC, subpath (e.g. data/)
-    value: /var/lib/postgresql
   - name: DB_PVC_SIZE
     description: Volume space available for data, e.g. 512Mi, 2Gi.
     displayName: Database Volume Capacity
     required: true
     value: 256Mi
+  - name: IMAGE_TAG
+    description: Image tag to use
+    value: latest
   - name: REGISTRY
     description: Container registry to import from (internal is image-registry.openshift-image-registry.svc:5000)
     value: ghcr.io
   ### Backup-Container starts here ###
-  - name: BACKUP_COMPONENT
-    description: BACKUP_COMPONENT name
-    value: database-backup
   - name: "DATABASE_DEFAULT_PORT"
     description: "The configured port for the database service"
     value: "5432"
@@ -35,10 +23,6 @@ parameters:
     description: "The strategy to use for backups; for example daily, or rolling."
     required: true
     value: "rolling"
-  - name: "BACKUP_DIR"
-    description: "The name of the root backup directory"
-    required: true
-    value: "/backups/"
   - name: "NUM_BACKUPS"
     description: "The number of backup files to be retained.  Used for the `daily` backup strategy.  Ignored when using the `rolling` backup strategy."
     required: false
@@ -85,9 +69,9 @@ objects:
   - kind: PersistentVolumeClaim
     apiVersion: v1
     metadata:
-      name: ${NAME}-${ZONE}-${COMPONENT}
+      name: gba-${ZONE}-database
       labels:
-        app: ${NAME}-${ZONE}
+        app: gba-${ZONE}
     spec:
       accessModes:
         - ReadWriteOnce
@@ -98,9 +82,9 @@ objects:
   - kind: ImageStream
     apiVersion: v1
     metadata:
-      name: ${NAME}-${ZONE}-${COMPONENT}
+      name: gba-${ZONE}-database
       labels:
-        app: ${NAME}-${ZONE}
+        app: gba-${ZONE}
     spec:
       lookupPolicy:
         local: false
@@ -114,9 +98,9 @@ objects:
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
-      name: ${NAME}-${ZONE}-${COMPONENT}
+      name: gba-${ZONE}-database
       labels:
-        app: ${NAME}-${ZONE}
+        app: gba-${ZONE}
     spec:
       replicas: 1
       triggers:
@@ -125,12 +109,12 @@ objects:
           imageChangeParams:
             automatic: true
             containerNames:
-              - ${NAME}
+              - gba
             from:
               kind: ImageStreamTag
-              name: ${NAME}-${ZONE}-${COMPONENT}:${IMAGE_TAG}
+              name: gba-${ZONE}-database:${IMAGE_TAG}
       selector:
-        deploymentconfig: ${NAME}-${ZONE}-${COMPONENT}
+        deploymentconfig: gba-${ZONE}-database
       strategy:
         type: Recreate
         recreateParams:
@@ -138,18 +122,18 @@ objects:
         activeDeadlineSeconds: 21600
       template:
         metadata:
-          name: ${NAME}-${ZONE}-${COMPONENT}
+          name: gba-${ZONE}-database
           labels:
-            app: ${NAME}-${ZONE}
-            deploymentconfig: ${NAME}-${ZONE}-${COMPONENT}
+            app: gba-${ZONE}
+            deploymentconfig: gba-${ZONE}-database
         spec:
           volumes:
-            - name: ${NAME}-${ZONE}-${COMPONENT}
+            - name: gba-${ZONE}-database
               persistentVolumeClaim:
-                claimName: ${NAME}-${ZONE}-${COMPONENT}
+                claimName: gba-${ZONE}-database
           containers:
-            - name: ${NAME}
-              image: ${NAME}-${ZONE}-${COMPONENT}:${IMAGE_TAG}
+            - name: gba
+              image: gba-${ZONE}-database:${IMAGE_TAG}
               ports:
                 - containerPort: 5432
                   protocol: TCP
@@ -179,21 +163,21 @@ objects:
                 - name: POSTGRES_DB
                   valueFrom:
                     secretKeyRef:
-                      name: ${NAME}-${ZONE}-${COMPONENT}
+                      name: gba-${ZONE}-database
                       key: database-name
                 - name: POSTGRES_PASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: ${NAME}-${ZONE}-${COMPONENT}
+                      name: gba-${ZONE}-database
                       key: database-password
                 - name: POSTGRES_USER
                   valueFrom:
                     secretKeyRef:
-                      name: ${NAME}-${ZONE}-${COMPONENT}
+                      name: gba-${ZONE}-database
                       key: database-user
               volumeMounts:
-                - name: ${NAME}-${ZONE}-${COMPONENT}
-                  mountPath: ${PVC_MOUNT_PATH}
+                - name: gba-${ZONE}-database
+                  mountPath: /var/lib/postgresql
               terminationMessagePath: /dev/termination-log
               terminationMessagePolicy: File
               imagePullPolicy: Always
@@ -205,8 +189,8 @@ objects:
     kind: Service
     metadata:
       labels:
-        app: ${NAME}-${ZONE}
-      name: ${NAME}-${ZONE}-${COMPONENT}
+        app: gba-${ZONE}
+      name: gba-${ZONE}-database
     spec:
       ports:
         - name: postgresql
@@ -215,16 +199,16 @@ objects:
           protocol: TCP
           targetPort: 5432
       selector:
-        deploymentconfig: ${NAME}-${ZONE}-${COMPONENT}
+        deploymentconfig: gba-${ZONE}-database
       sessionAffinity: None
       type: ClusterIP
   ### Backup-Container starts here ###
   - kind: PersistentVolumeClaim
     apiVersion: v1
     metadata:
-      name: ${NAME}-${ZONE}-${BACKUP_COMPONENT}
+      name: gba-${ZONE}-database-backup
       labels:
-        app: ${NAME}-${ZONE}
+        app: gba-${ZONE}
     spec:
       accessModes:
         - ReadWriteOnce
@@ -235,10 +219,10 @@ objects:
   - kind: CronJob
     apiVersion: "batch/v1"
     metadata:
-      name: ${NAME}-${ZONE}-${BACKUP_COMPONENT}
+      name: gba-${ZONE}-database-backup
       labels:
-        app: ${NAME}-${ZONE}
-        cronjob: ${NAME}-${ZONE}
+        app: gba-${ZONE}
+        cronjob: gba-${ZONE}
     spec:
       schedule: "${CRON_MINUTES} 8 * * *" # Run daily at 8:xx AM UTC
       concurrencyPolicy: "Replace"
@@ -247,29 +231,29 @@ objects:
       jobTemplate:
         metadata:
           labels:
-            app: ${NAME}-${ZONE}
-            cronjob: ${NAME}-${ZONE}
+            app: gba-${ZONE}
+            cronjob: gba-${ZONE}
         spec:
           backoffLimit: ${{JOB_BACKOFF_LIMIT}}
           template:
             metadata:
               labels:
-                app: ${NAME}-${ZONE}
-                cronjob: ${NAME}-${ZONE}
+                app: gba-${ZONE}
+                cronjob: gba-${ZONE}
             spec:
               containers:
-                - name: ${NAME}-${ZONE}
+                - name: gba-${ZONE}
                   image: "bcgovimages/backup-container:latest"
                   command:
                     - "/bin/bash"
                     - "-c"
                     - "/backup.sh -1"
                   volumeMounts:
-                    - mountPath: "${BACKUP_DIR}"
+                    - mountPath: "/backups/"
                       name: "backup"
                   env:
                     - name: BACKUP_DIR
-                      value: "${BACKUP_DIR}"
+                      value: "/backups/"
                     - name: BACKUP_STRATEGY
                       value: "${BACKUP_STRATEGY}"
                       optional: true
@@ -286,28 +270,28 @@ objects:
                       value: "${MONTHLY_BACKUPS}"
                       optional: true
                     - name: DATABASE_SERVICE_NAME
-                      value: "${NAME}-${ZONE}-database"
+                      value: "gba-${ZONE}-database"
                     - name: DEFAULT_PORT
                       value: ${DATABASE_DEFAULT_PORT}
                     - name: POSTGRESQL_DATABASE
                       valueFrom:
                         secretKeyRef:
-                          name: "${NAME}-${ZONE}-database"
+                          name: "gba-${ZONE}-database"
                           key: "database-name"
                     - name: DATABASE_USER
                       valueFrom:
                         secretKeyRef:
-                          name: ${NAME}-${ZONE}-database
+                          name: gba-${ZONE}-database
                           key: "database-user"
                     - name: DATABASE_PASSWORD
                       valueFrom:
                         secretKeyRef:
-                          name: ${NAME}-${ZONE}-database
+                          name: gba-${ZONE}-database
                           key: "database-password"
               volumes:
                 - name: backup
                   persistentVolumeClaim:
-                    claimName: ${NAME}-${ZONE}-${BACKUP_COMPONENT}
+                    claimName: gba-${ZONE}-database-backup
               restartPolicy: "Never"
               terminationGracePeriodSeconds: 30
               activeDeadlineSeconds: 1600
